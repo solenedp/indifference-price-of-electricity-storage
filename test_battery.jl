@@ -4,7 +4,7 @@ Q = 5 # initial amount of money invested
 C_max = 5 # capacity of the storage
 r = 0.05
 l = 0.05
-T = 5
+T = 10
 
 function subproblem_builder(subproblem::Model, node::Int)
     # State variables
@@ -13,18 +13,21 @@ function subproblem_builder(subproblem::Model, node::Int)
     # Control variables
     @variable(subproblem, -C_max <= U <= C_max) # units of electricity brought from the electricity market 
     # Random variables
-    @variable(subproblem,unit_price)
     # the prices are low every other day. 
+    @variable(subproblem, total_price)
+
+    @constraint(subproblem,price,Z.out == (1+r)*Z.in - 1*U)
+
     Ω1 = [1.0, 1.5, 2.0]
     Ω2 = [2.5, 3.0, 3.5]
     P = [1 / 3, 1 / 3, 1 / 3]
     if node%2 == 0
         SDDP.parameterize(subproblem, Ω1, P) do ω
-            return JuMP.fix(unit_price, ω)
+            return JuMP.set_normalized_coefficient(price,U, ω)
         end
     else
         SDDP.parameterize(subproblem, Ω2, P) do ω
-            return JuMP.fix(unit_price, ω)
+            return JuMP.set_normalized_coefficient(price,U, ω)
         end
     end
 
@@ -32,7 +35,6 @@ function subproblem_builder(subproblem::Model, node::Int)
     @constraints(
         subproblem,
         begin
-            Z.out == (1+r)*Z.in - unit_price*U # balance equation for the invested money
             C.out == (1 - l)*C.in + U # balance equation for the storage
         end
     )
