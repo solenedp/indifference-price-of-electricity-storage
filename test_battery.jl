@@ -8,7 +8,7 @@ T = 5
 nb_nodes = 10
 
 
-Q = 5 # initial amount of money invested 
+Q = 10 # initial amount of money invested 
 C_max = 5 # capacity of the storage
 r = 0.05
 l = 0.05
@@ -73,33 +73,36 @@ end
 
 moy_ln = [1.0, 0.18,1.63,1.52,1.46,0.16,1.84,1.79,1.77,1.86,1.92,1.96,1.93,1.80,1.90,1.83,1.99,1.95,1.94,1.85,2.00,2.01,1.94,1.87,1.90,1.87,1.90,1.73,1.75,1.87,1.76,1.83,1.82,1.84,1.79,1.98,1.99,1.97,2.08,2.02,1.94,2.03,2.02,2.06,1.95,2.03,1.91,1.90,1.47]
 
+rho = 0.1
+
 model = SDDP.PolicyGraph(
     graph,  # <--- New stuff
     sense = :Min,
-    lower_bound = -10.0,
+    lower_bound = 0.0,
     optimizer = Ipopt.Optimizer,
 ) do sp, node
     t, x = node 
-    @variable(sp, -100<= Z <= 100, SDDP.State, initial_value = -Q)
+    @variable(sp, Z, SDDP.State, initial_value = -Q)
     @variable(sp, 0 <= C <= C_max, SDDP.State, initial_value = 0)
     @variable(sp, -C_max <= U <= C_max)
-    @variable(sp, -1000 <= utility <= 1000, SDDP.State, initial_value = -exp(-Q)/Q) #utility function
-    @variable(sp, -10 <= price <= 1000)
+    @variable(sp, objective, SDDP.State, initial_value = exp(rho*Q)/rho) #utility function
+    @variable(sp, price)
         
     @constraint(sp,Z.out == (1+r)*Z.in - price*U)
     @constraint(sp,C.out == (1 - l)*C.in + U)
 
     # NL constraints 
-    
+    #@constraint(sp, price == 1)
     @NLconstraint(sp, price == exp(moy_ln[t+1] + x))
-    @NLconstraint(sp, utility.out == exp(-Z.out)/Z.out)
+    @NLconstraint(sp, objective.out == exp(-rho*Z.out)/rho)
     
 
     if t == T
-        @stageobjective(sp, utility.out) # maximize the final amount of money of the investor 
+        #@stageobjective(sp, -Z.out) # maximize the final amount of money of the investor 
+        @stageobjective(sp, objective.out)
     else
         @stageobjective(sp,0.0)
     end
 end
 
-SDDP.train(model; iteration_limit = 300)
+SDDP.train(model; iteration_limit = 30)
