@@ -1,108 +1,115 @@
 using SDDP
 using Ipopt
+using Distributed 
 
-T = 5
+function main_SDDP(file_name = "data.txt", result_file = "test_default.txt", iteration_limit = 30, parallel = false, nb_processors = 5, mu = 1)
 
-#construction of the Markov chain
+    #load data
 
-nb_nodes = 10
-
-
-Q = 10 # initial amount of money invested 
-C_max = 5 # capacity of the storage
-r = 0.05
-l = 0.05
-
-P = [[2.44521466e-02, 1.01586963e-01, 2.35524077e-01, 3.05140013e-01,
-2.20997414e-01, 8.94109317e-02, 2.01732309e-02, 2.53212550e-03,
-1.76308552e-04, 6.78940228e-06],
-[1.29969000e-02, 6.60975750e-02, 1.87512336e-01, 2.97234238e-01,
-2.63458936e-01, 1.30535524e-01, 3.61039279e-02, 5.56204262e-03,
-4.75964236e-04, 2.25566800e-05],
-[6.46239959e-03, 4.02148583e-02, 1.39518647e-01, 2.70386036e-01,
-2.93037489e-01, 1.77613967e-01, 6.01465907e-02, 1.13576715e-02,
-1.19286422e-03, 6.94774269e-05],
-[3.00348641e-03, 2.28677558e-02, 9.69956530e-02, 2.29710938e-01,
-3.04191538e-01, 2.25346683e-01, 9.33313185e-02, 2.15764022e-02,
-2.77766052e-03, 1.98564667e-04],
-[1.30334187e-03, 1.21445741e-02, 6.29848123e-02, 1.82260170e-01,
-2.94802326e-01, 2.66764990e-01, 1.35019287e-01, 3.81759427e-02,
-6.01725025e-03, 5.27304860e-04],
-[5.27304860e-04, 6.01725025e-03, 3.81759427e-02, 1.35019287e-01,
-2.66764990e-01, 2.94802326e-01, 1.82260170e-01, 6.29848123e-02,
-1.21445741e-02, 1.30334187e-03],
-[1.98564667e-04, 2.77766052e-03, 2.15764022e-02, 9.33313185e-02,
-2.25346683e-01, 3.04191538e-01, 2.29710938e-01, 9.69956530e-02,
-2.28677558e-02, 3.00348641e-03],
-[6.94774269e-05, 1.19286422e-03, 1.13576715e-02, 6.01465907e-02,
-1.77613967e-01, 2.93037489e-01, 2.70386036e-01, 1.39518647e-01,
-4.02148583e-02, 6.46239959e-03],
-[2.25566800e-05, 4.75964236e-04, 5.56204262e-03, 3.61039279e-02,
-1.30535524e-01, 2.63458936e-01, 2.97234238e-01, 1.87512336e-01,
-6.60975750e-02, 1.29969000e-02],
-[6.78940228e-06, 1.76308552e-04, 2.53212550e-03, 2.01732309e-02,
-8.94109317e-02, 2.20997414e-01, 3.05140013e-01, 2.35524077e-01,
-1.01586963e-01, 2.44521466e-02]]
-
-x = [-3.0, -2.33333333, -1.66666667, -1.0, -0.33333333, 0.33333333, 1.0,  1.66666667,  2.33333333,  3.0]
-
-P0 = [0.0008087017685485502, 0.00846010118182768, 0.04905459596786487, 0.15806063773047954, 0.28357197615903235, 0.2835719761590324, 0.15806063773047954, 0.04905459596786495, 0.008460101181827688, 0.0008087017685485502]
-
-global graph = SDDP.Graph((0,0.0))
+    include(file_name)
 
 
-for t in 1:T
-    for x_val in x
-        SDDP.add_node(graph,(t,x_val))
-    end
-end
+    # create the Markovian graph
 
-for i in 1:10
-    SDDP.add_edge(graph, (0,0.0) => (1,x[i]), P0[i])
-end
+    global graph = SDDP.Graph((0,exp(moy_ln[1])))
 
-for i in 1:10
-    for j in 1:10
-        for t in 2:T
-            SDDP.add_edge(graph, (t-1,x[i]) => (t,x[j]), P[i][j])
+    for t in 1:T
+        for x_val in x
+            SDDP.add_node(graph,(t,exp(moy_ln[t+1]+mu*x_val)))
         end
     end
-end
-    
-#model 
 
-moy_ln = [1.0, 0.18,1.63,1.52,1.46,0.16,1.84,1.79,1.77,1.86,1.92,1.96,1.93,1.80,1.90,1.83,1.99,1.95,1.94,1.85,2.00,2.01,1.94,1.87,1.90,1.87,1.90,1.73,1.75,1.87,1.76,1.83,1.82,1.84,1.79,1.98,1.99,1.97,2.08,2.02,1.94,2.03,2.02,2.06,1.95,2.03,1.91,1.90,1.47]
-
-rho = 0.1
-
-model = SDDP.PolicyGraph(
-    graph,  # <--- New stuff
-    sense = :Min,
-    lower_bound = 0.0,
-    optimizer = Ipopt.Optimizer,
-) do sp, node
-    t, x = node 
-    @variable(sp, Z, SDDP.State, initial_value = -Q)
-    @variable(sp, 0 <= C <= C_max, SDDP.State, initial_value = 0)
-    @variable(sp, -C_max <= U <= C_max)
-    @variable(sp, objective, SDDP.State, initial_value = exp(rho*Q)/rho) #utility function
-    @variable(sp, price)
-        
-    @constraint(sp,Z.out == (1+r)*Z.in - price*U)
-    @constraint(sp,C.out == (1 - l)*C.in + U)
-
-    # NL constraints 
-    #@constraint(sp, price == 1)
-    @NLconstraint(sp, price == exp(moy_ln[t+1] + x))
-    @NLconstraint(sp, objective.out == exp(-rho*Z.out)/rho)
-    
-
-    if t == T
-        #@stageobjective(sp, -Z.out) # maximize the final amount of money of the investor 
-        @stageobjective(sp, objective.out)
-    else
-        @stageobjective(sp,0.0)
+    for i in 1:10
+        SDDP.add_edge(graph, (0,exp(moy_ln[1])) => (1,exp(moy_ln[2] + mu*x[i])), P0[i])
     end
+
+    for i in 1:10
+        for j in 1:10
+            for t in 2:T
+                SDDP.add_edge(graph, (t-1,exp(moy_ln[t] + mu*x[i])) => (t,exp(moy_ln[t+1] + mu*x[j])), P[i][j])
+            end
+        end
+    end 
+
+
+    # create the model
+
+    model = SDDP.PolicyGraph(
+        graph,  # <--- New stuff
+        sense = :Min,
+        lower_bound = 0.0,
+        optimizer = Ipopt.Optimizer,
+    ) do sp, node
+        t, price = node 
+        @variable(sp, Z, SDDP.State, initial_value = -Q/sc)
+        @variable(sp, 0 <= C <= C_max, SDDP.State, initial_value = 0)
+        @variable(sp, -C_max <= U <= C_max)
+        @variable(sp, 0<= utility, SDDP.State, initial_value = exp(rho*Q/sc)/rho)
+        @constraint(sp,Z.out == (1+r)*Z.in - price*U/sc)
+        @constraint(sp,C.out == (1 - l)*C.in + U)
+
+        # NL constraints 
+
+        @NLconstraint(sp, utility.out == exp(-rho*Z.out)/rho)
+        
+
+        if t == T
+            @stageobjective(sp, utility.out) # maximize the final amount of money of the investor 
+            #@stageobjective(sp, -Z.out)
+        else
+            @stageobjective(sp,0.0)
+        end
+    end
+
+
+    # train the model 
+
+    if parallel
+        Distributed.addprocs(nb_processors)
+
+        SDDP.train(model; iteration_limit, parallel_scheme = SDDP.Asynchronous(), log_file = result_file)
+    else
+        SDDP.train(model; iteration_limit, log_file = result_file)
+    end
+
+
+    # compute the price of the battery
+
+    utility = SDDP.calculate_bound(model)
+    beta = (sc/rho)*log(1/(rho*utility))
+    alpha = (1+r)^T
+    price = beta/alpha 
+    
+    return model, price 
+
 end
 
-SDDP.train(model; iteration_limit = 30)
+
+function simulations(model, nb_simulations = 5, parallel = false)
+
+    if parallel 
+        simulations = SDDP.simulate(model,nb_simulations,[:Z, :U], parallel_scheme = SDDP.Asynchronous())
+    else
+        simulations = SDDP.simulate(model,nb_simulations,[:Z, :U])
+    end
+
+    plt = SDDP.SpaghettiPlot(simulations)
+
+    SDDP.add_spaghetti(plt; title = "Z") do data
+        return data[:Z].out
+    end
+
+
+    SDDP.add_spaghetti(plt; title = "U") do data
+        return data[:U]
+    end
+
+
+    SDDP.add_spaghetti(plt; title = "price") do data
+        return (sc/data[:U])*((1+r)*data[:Z].in - data[:Z].out)
+    end
+
+    SDDP.plot(plt, "spaghetti_plot.html")
+
+end 
+
